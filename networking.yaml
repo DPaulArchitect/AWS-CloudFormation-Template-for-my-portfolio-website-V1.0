@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  This cloudformation template is my portfolio website.
+
+Parameters:
+  DomainName:
+    Description: This is the custom domain name that you have already purchased, without any subdomains i.e example.com. NOTE! domain validation is handled automatically if all three of the following are true; The certificate domain is hosted in Amazon Route 53, the domain resides in your AWS account, and you are using DNS validation.
+    Type: String
+
+
+Resources:
+  # vpc 
+  portfoliovpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      Tags:  
+        - Key: application
+          Value: portfolio
+
+  # internet gateway
+  vpcigw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: application
+          Value: portfolio
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref portfoliovpc
+      InternetGatewayId: !Ref vpcigw
+
+  # Subnets
+  publicsubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1a
+      VpcId: !Ref portfoliovpc
+      CidrBlock: 10.0.1.0/20
+      MapPublicIpOnLaunch: true
+
+
+  publicsubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1b
+      VpcId: !Ref portfoliovpc
+      CidrBlock: 10.0.16.0/20
+      MapPublicIpOnLaunch: true
+
+  private1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1a
+      CidrBlock: 10.0.32.0/20
+      VpcId: !Ref portfoliovpc
+
+  private2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-east-1b
+      CidrBlock: 10.0.48.0/20
+      VpcId: !Ref portfoliovpc
+
+  # ALB Security Group
+  albsecuritygroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ALBSG
+      GroupDescription: 443 from the world
+      VpcId: !Ref portfoliovpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  
+  #ec2 instance sg
+  EC2InstanceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: EC2InstanceSG
+      GroupDescription: "80 from ALB"
+      VpcId: !Ref portfoliovpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !GetAtt albsecuritygroup.GroupId
+  
+
+  # ACM Certificate
+  SiteCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+
+  # Application Load Balancer
+  myALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: myPortfolioALB
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref albsecuritygroup
+      Subnets:
+        - !Ref publicsubnet1
+        - !Ref publicsubnet2
+      Type: application
+      
+
+  # Target Group for ALB
+  myTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref portfoliovpc
+      Port: 443
+      Protocol: HTTPS
+
+  # Listener for ALB
+  myListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref myTargetGroup
+      LoadBalancerArn: !Ref myALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref SiteCertificate
